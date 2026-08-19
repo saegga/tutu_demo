@@ -1,0 +1,22 @@
+docs/
+node_modules/
+nuxt-app/node_modules/
+nuxt-app/.nuxt/
+nuxt-app/.output/
+nuxt-app/.env
+
+.nitro
+.cache
+dist
+
+# Node dependencies
+node_modules
+
+# Logs
+logs
+*.log
+
+# Misc
+.DS_Store
+.fleet
+.idea

@@ -1,0 +1,21 @@
+<template>
+  <div class="flex h-screen w-screen overflow-hidden bg-white">
+    <!-- LEFT: AI CHAT -->
+    <aside class="flex w-[33%] shrink-0 flex-col border-r">
+      <ChatAgent class="flex-1 min-h-0" />
+    </aside>
+
+    <!-- RIGHT: MAP / ROUTE -->
+    <main class="relative flex-1 min-w-0">
+      <ClientOnly>
+        <RouteOverlay :state="tripState" :issues="issues" :draft="draft" />
+      </ClientOnly>
+    </main>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { useAgent } from '../composables/useAgent'
+
+const { tripState, issues, draft } = useAgent()
+</script>
