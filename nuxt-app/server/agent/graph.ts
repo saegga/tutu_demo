@@ -176,7 +176,7 @@ function answerNode(state: typeof AgentState.State) {
 
   let reply = summary
   if (ready) {
-    reply += '\nВсё верно? Если да — один твой кивок, и я запускаю генерацию!'
+    reply += '\nВсё верно? Если да — я запускаю генерацию!'
   } else if (question) {
     reply += `\n${question}`
   }

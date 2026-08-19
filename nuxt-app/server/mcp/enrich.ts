@@ -65,6 +65,8 @@ export async function enrichTripStateWithTransport(
   const origin = state.places[0]
   if (!origin || state.stops.length === 0) return state
 
+  const lastErrors: string[] = []
+
   const searchName = (id: string): string | null => {
     const p = state.places.find((pl) => pl.id === id)
     return p?.searchName ?? p?.name ?? null
@@ -79,15 +81,30 @@ export async function enrichTripStateWithTransport(
   }
   route.push({ fromId: stops[stops.length - 1].place_id, toId: origin.id, date: state.trip.end })
 
+  // Если пожелание привязано к конкретному городу («во Владивосток на ж/д») —
+  // глобальный preferences.transportMode не применяем к остальным перегонам,
+  // иначе «на ж/д» вдруг становится поездом везде.
+  const needsText = needs.join(' ').toLowerCase()
+  const hasCityMention = state.places.some(
+    (p) =>
+      needsText.includes(p.name.toLowerCase())
+      || (p.searchName ? needsText.includes(p.searchName.toLowerCase()) : false),
+  )
+
   for (const seg of route) {
     if (legs.some((l) => l.from_place_id === seg.fromId && l.to_place_id === seg.toId)) continue
 
     const mode =
       legTransportMode(seg.fromId, seg.toId, needs, state.places)
-      ?? state.preferences.transportMode
+      ?? (hasCityMention ? null : state.preferences.transportMode)
       ?? 'flight'
     const found = await searchLeg(modeTools(mode), modeKinds(mode), seg, state, searchName)
     if (found) legs.push(found)
+    else lastErrors.push(`${seg.fromId}→${seg.toId} mode=${mode}`)
+  }
+
+  if (legs.length === state.transport.length && lastErrors.length > 0) {
+    console.error('[MCP] transport enrich failed legs:', lastErrors.join('; '))
   }
 
   return { ...state, transport: legs }

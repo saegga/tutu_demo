@@ -5,7 +5,7 @@ import type { Place, TransportMode } from '~shared'
 // перегону: «до Владивостока на ж/д», «обратно на самолёте».
 
 export function parseTransportMode(text: string): TransportMode | null {
-  if (/(поезд|жд|железнодор|на поезде|плацкарт|купе|сидячий|электрич)/.test(text)) return 'train'
+  if (/(поезд|ж\/?д|железнодор|на поезде|плацкарт|купе|сидячий|электрич|поездом)/.test(text)) return 'train'
   if (/(автобус|на автобусе|рейсовый автобус)/.test(text)) return 'bus'
   if (/(самолёт|самолет|авиа|на самолёте|полететь|перелететь|рейсом)/.test(text)) return 'flight'
   return null

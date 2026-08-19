@@ -59,6 +59,9 @@ export default defineEventHandler(async (event) => {
   let nextDraft: typeof draft
   let reply: string
   let status: 'ready' | 'waiting_for_user' | 'collecting' | 'understanding'
+  let regenerated = false
+  let state: TripState | null = null
+  let stateIssues: ValidatorIssue[] = []
 
   // Открытый вопрос «добавить/заменить» — отвечаем на него напрямую,
   // не прогоняя ответ через модель (иначе модель повторно ставит ask → цикл).
@@ -85,22 +88,50 @@ export default defineEventHandler(async (event) => {
       status = 'waiting_for_user'
     }
   } else {
-    try {
-      const result = await runCollectionAgent({
-        draft,
-        userPreferences: prefs,
-        messages: history,
-      })
-      nextDraft = result.draft
-      reply = result.reply
-      status = result.status as typeof status
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
-      reply = `Упс, что-то пошло не так: ${message}. Попробуй перефразировать.`
-      status = 'waiting_for_user'
-      nextDraft = draft
+    // Пользователь подтверждает запуск генерации («да», «всё верно») —
+    // строим маршрут сразу, без вопроса модели (иначе модель повторяет
+    // «Всё верно? Если да — кивок» бесконечно).
+    const lastAssistant = prior.filter((m) => m.role === 'assistant').at(-1)?.content ?? ''
+    const asksConfirmation = /(вс[ёе] готово|генераци|кивок|запускаю генерацию)/.test(lastAssistant)
+    const isConfirmation = /(^|\s)(да|давай|конечно|поехали|запускай|запусти|согласен|го|верно|точно|ок|ok|вс[ёе] верно|вс[ёе] правильно)(\s|$|[.,!?])/.test(
+      body.message.toLowerCase(),
+    )
 
-      await addEvent(supabase, body.tripId, { type: 'error', message })
+    if (asksConfirmation && isConfirmation && isDraftReadyToGenerate(draft)) {
+      nextDraft = draft
+      try {
+        const gen = await buildGeneratedState(draft, prefs)
+        state = gen.state
+        stateIssues = gen.issues
+        regenerated = true
+        reply = `Запускаю генерацию!\n\n${routeSummary(gen.state)}\n\nСмотри детали маршрута, транспорта и отелей справа.`
+        status = 'ready'
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        reply = `Упс, не удалось построить маршрут: ${message}. Попробуй ещё раз.`
+        status = 'waiting_for_user'
+        nextDraft = draft
+
+        await addEvent(supabase, body.tripId, { type: 'error', message })
+      }
+    } else {
+      try {
+        const result = await runCollectionAgent({
+          draft,
+          userPreferences: prefs,
+          messages: history,
+        })
+        nextDraft = result.draft
+        reply = result.reply
+        status = result.status as typeof status
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        reply = `Упс, что-то пошло не так: ${message}. Попробуй перефразировать.`
+        status = 'waiting_for_user'
+        nextDraft = draft
+
+        await addEvent(supabase, body.tripId, { type: 'error', message })
+      }
     }
   }
 
@@ -119,12 +150,9 @@ export default defineEventHandler(async (event) => {
 
   // Авто-перегенерация: если маршрут уже был построен и draft изменился —
   // пересобираем состояние прямо в чате, без повторного нажатия кнопки.
+  // (Ветка подтверждения генерации выше уже пересобрала state сама.)
   const draftChanged = JSON.stringify(nextDraft) !== JSON.stringify(draft)
-  let regenerated = false
-  let state: TripState | null = null
-  let stateIssues: ValidatorIssue[] = []
-
-  if (draftChanged && trip.state && isDraftReadyToGenerate(nextDraft)) {
+  if (!regenerated && draftChanged && trip.state && isDraftReadyToGenerate(nextDraft)) {
     try {
       const gen = await buildGeneratedState(nextDraft, prefs)
       state = gen.state
@@ -147,6 +175,16 @@ export default defineEventHandler(async (event) => {
     }
   }
 
+  if (regenerated && state) {
+    await updateTrip(supabase, body.tripId, {
+      state,
+      core: state.trip,
+      preferences: state.preferences,
+      phase: 'generated',
+    })
+    await addEvent(supabase, body.tripId, { type: 'state_update', trip_state: state })
+  }
+
   return {
     reply,
     draft: nextDraft,
@@ -157,3 +195,13 @@ export default defineEventHandler(async (event) => {
     issues: regenerated ? stateIssues : undefined,
   }
 })
+
+function routeSummary(state: TripState): string {
+  const nameOf = (id: string) => state.places.find((p) => p.id === id)?.name ?? id
+  const first = state.places[0]
+  const names = [first ? nameOf(first.id) : '', ...state.stops.map((s) => nameOf(s.place_id))]
+    .filter(Boolean)
+    .join(' → ')
+  const modes = state.transport.map((t) => t.mode).join(', ')
+  return `Маршрут: ${names}.\nТранспорт: ${modes || 'подбирается'}.\nОтелей подобрано: ${state.hotels.length}.`
+}

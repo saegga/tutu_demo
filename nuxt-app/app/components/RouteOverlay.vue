@@ -5,7 +5,7 @@
     <!-- Основная панель: прогресс сбора поездки (по умолчанию) -->
     <div
       v-if="!mapOpen"
-      class="absolute inset-0 z-[800] overflow-y-auto bg-white"
+      class="absolute inset-0 z-[1000] overflow-y-auto bg-white"
     >
       <ProgressPanel :draft="draft" :generated="Boolean(state)" />
     </div>

@@ -15,7 +15,7 @@
     </header>
 
     <!-- Draft status -->
-    <div class="border-b px-4 py-3">
+    <div class="border-b px-4 py-3" style="display:none">
       <p class="mb-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
         Маршрут
       </p>

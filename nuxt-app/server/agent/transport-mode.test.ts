@@ -12,6 +12,7 @@ const places = [moscow, blagoveshchensk, vladivostok]
 describe('parseTransportMode', () => {
   it('detects modes', () => {
     expect(parseTransportMode('на ж/д поезде')).toBe('train')
+    expect(parseTransportMode('во Владивосток на ж/д')).toBe('train')
     expect(parseTransportMode('на автобусе')).toBe('bus')
     expect(parseTransportMode('обратно на самолёте')).toBe('flight')
     expect(parseTransportMode('музеи и пляж')).toBeNull()

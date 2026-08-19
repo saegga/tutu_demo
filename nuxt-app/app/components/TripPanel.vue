@@ -25,7 +25,7 @@
           :href="leg.booking_url"
           target="_blank"
           rel="noopener"
-          class="ml-auto text-blue-600 hover:underline"
+          class="ml-auto shrink-0 rounded-xl bg-blue-600 px-3.5 py-1.5 text-xs font-medium text-white transition hover:bg-blue-700"
         >
           купить
         </a>
@@ -55,7 +55,7 @@
               v-if="hotel.image_url"
               :src="hotel.image_url"
               :alt="hotel.name"
-              class="h-10 w-10 shrink-0 rounded-md object-cover"
+              class="h-16 w-16 shrink-0 rounded-lg object-cover"
               loading="lazy"
             >
             <span class="min-w-0">
