@@ -102,6 +102,15 @@ export async function listTrips(supabase: SupabaseClient): Promise<TripRow[]> {
   return (data as TripRow[]) ?? []
 }
 
+export async function deleteTrip(
+  supabase: SupabaseClient,
+  tripId: string,
+): Promise<boolean> {
+  const { error } = await supabase.from('trips').delete().eq('id', tripId)
+  if (error) throw storeError('deleteTrip', error.message)
+  return true
+}
+
 export async function updateTrip(
   supabase: SupabaseClient,
   tripId: string,

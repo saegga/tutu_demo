@@ -4,7 +4,7 @@ import { legTransportMode } from '../agent/transport-mode'
 import { searchHotels, searchTransport, type TransportToolName } from './client'
 import { normalizeSearchResult } from './normalizer'
 
-// Best-effort: тянет по 2 отеля на каждый стоп через search_hotels.
+// Best-effort: тянет по 10 отелей на каждый стоп через search_hotels.
 // Ошибки MCP/сети не роняют генерацию — стейт просто остаётся без отелей.
 export async function enrichTripStateWithHotels(state: TripState): Promise<TripState> {
   const searchName = (id: string): string | null => {
@@ -28,7 +28,7 @@ export async function enrichTripStateWithHotels(state: TripState): Promise<TripS
         check_in: state.trip.start,
         check_out: state.trip.end,
         adults: state.trip.travelers,
-        page_size: 3,
+        page_size: 10,
         view: 'compact',
       })
 
@@ -42,7 +42,7 @@ export async function enrichTripStateWithHotels(state: TripState): Promise<TripS
       const top = options
         .filter((o): o is { kind: 'hotel'; normalized: HotelOption } => o.kind === 'hotel')
         .map((o) => o.normalized)
-        .slice(0, 2)
+        .slice(0, 10)
 
       hotels.push(...top)
     } catch {
@@ -53,19 +53,21 @@ export async function enrichTripStateWithHotels(state: TripState): Promise<TripS
   return { ...state, hotels }
 }
 
-// Best-effort: перелёты/поезда/автобусы по маршруту origin → stops → origin.
-// Вид транспорта — ПО ПЕРЕГОНУ: из пожеланий («до Владивостока на ж/д»,
-// «обратно на самолёте») или общий, по умолчанию — самый дешёвый рейс.
-// Если предпочитаемый вид по паре городов ничего не нашёл — пробуем авиа.
-export async function enrichTripStateWithTransport(
-  state: TripState,
-  needs: string[],
-): Promise<TripState> {
-  const legs: TransportLeg[] = [...state.transport]
-  const origin = state.places[0]
-  if (!origin || state.stops.length === 0) return state
+// Детерминированный план перегонов origin → stops → origin с видом транспорта
+// ПО ПЕРЕГОНУ: из пожеланий («до Владивостока на ж/д») или общего предпочтения.
+// Используется и агентом (тулинг MCP), и фолбэком в buildGeneratedState.
+export interface TransportPlanLeg {
+  fromId: string
+  toId: string
+  origin: string
+  destination: string
+  date: string
+  mode: TransportMode
+}
 
-  const lastErrors: string[] = []
+export function planTransportRoute(state: TripState, needs: string[]): TransportPlanLeg[] {
+  const origin = state.places[0]
+  if (!origin || state.stops.length === 0) return []
 
   const searchName = (id: string): string | null => {
     const p = state.places.find((pl) => pl.id === id)
@@ -91,23 +93,53 @@ export async function enrichTripStateWithTransport(
       || (p.searchName ? needsText.includes(p.searchName.toLowerCase()) : false),
   )
 
-  for (const seg of route) {
-    if (legs.some((l) => l.from_place_id === seg.fromId && l.to_place_id === seg.toId)) continue
-
-    const mode =
+  return route.map((seg) => ({
+    ...seg,
+    origin: searchName(seg.fromId) ?? seg.fromId,
+    destination: searchName(seg.toId) ?? seg.toId,
+    mode:
       legTransportMode(seg.fromId, seg.toId, needs, state.places)
       ?? (hasCityMention ? null : state.preferences.transportMode)
-      ?? 'flight'
-    const found = await searchLeg(modeTools(mode), modeKinds(mode), seg, state, searchName)
-    if (found) legs.push(found)
-    else lastErrors.push(`${seg.fromId}→${seg.toId} mode=${mode}`)
+      ?? 'flight',
+  }))
+}
+
+// Best-effort: перелёты/поезда/автобусы по маршруту origin → stops → origin.
+// Если предпочитаемый вид по паре городов ничего не нашёл — пробуем авиа.
+export async function enrichTripStateWithTransport(
+  state: TripState,
+  needs: string[],
+): Promise<TripState> {
+  const legs: TransportLeg[] = [...state.transport]
+  const transportOptions: TransportLeg[] = [...(state.transport_options ?? [])]
+  const plan = planTransportRoute(state, needs)
+
+  const lastErrors: string[] = []
+
+  const searchName = (id: string): string | null => {
+    const p = state.places.find((pl) => pl.id === id)
+    return p?.searchName ?? p?.name ?? null
+  }
+
+  for (const seg of plan) {
+    if (legs.some((l) => l.from_place_id === seg.fromId && l.to_place_id === seg.toId)) continue
+
+    const found = await searchLeg(modeTools(seg.mode), modeKinds(seg.mode), seg, state, searchName)
+    if (found) {
+      for (const opt of found) {
+        if (opt.id && !transportOptions.some((o) => o.id === opt.id)) transportOptions.push(opt)
+      }
+      legs.push(found[0])
+    } else {
+      lastErrors.push(`${seg.fromId}→${seg.toId} mode=${seg.mode}`)
+    }
   }
 
   if (legs.length === state.transport.length && lastErrors.length > 0) {
     console.error('[MCP] transport enrich failed legs:', lastErrors.join('; '))
   }
 
-  return { ...state, transport: legs }
+  return { ...state, transport: legs, transport_options: transportOptions }
 }
 
 function modeTools(mode: TransportMode): TransportToolName[] {
@@ -147,7 +179,7 @@ async function searchLeg(
   seg: { fromId: string; toId: string; date: string },
   state: TripState,
   searchName: (id: string) => string | null,
-): Promise<TransportLeg | null> {
+): Promise<TransportLeg[] | null> {
   for (const tool of tools) {
     try {
       const result = await searchTransport(tool, transportArgs(tool, seg, state.trip.travelers, searchName))
@@ -158,12 +190,12 @@ async function searchLeg(
         toPlaceId: seg.toId,
       })
 
-      const match = options
+      const matches = options
         .filter((o): o is { kind: string; normalized: TransportLeg } => kinds.includes(o.kind))
         .map((o) => o.normalized)
-        .sort((a, b) => (a.price ?? Number.POSITIVE_INFINITY) - (b.price ?? Number.POSITIVE_INFINITY))[0]
+        .sort((a, b) => (a.price ?? Number.POSITIVE_INFINITY) - (b.price ?? Number.POSITIVE_INFINITY))
 
-      if (match) return match
+      if (matches.length > 0) return matches
     } catch {
       // MCP недоступен — пробуем следующий инструмент
     }

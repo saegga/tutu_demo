@@ -89,6 +89,20 @@ export async function getTrip(tripId: string): Promise<MockTripRow | null> {
   return trips.get(tripId) ?? null
 }
 
+export async function listTrips(): Promise<MockTripRow[]> {
+  return [...trips.values()].sort(
+    (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+  )
+}
+
+export async function deleteTrip(tripId: string): Promise<boolean> {
+  const existed = trips.delete(tripId)
+  messages.delete(tripId)
+  proposals.delete(tripId)
+  events.delete(tripId)
+  return existed
+}
+
 export async function updateTrip(
   tripId: string,
   patch: Partial<Pick<MockTripRow, 'draft' | 'core' | 'preferences' | 'state' | 'phase' | 'title'>>,

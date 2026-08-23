@@ -1,4 +1,5 @@
 import type {
+  HotelOption,
   TripState,
   ValidatorIssue,
   ValidatorResult,
@@ -105,10 +106,30 @@ export function daysBetween(start: string, end: string): number {
 }
 
 export function totalKnownCost(state: TripState): number {
+  const byId = new Map<string, HotelOption>()
+  for (const h of state.hotels) byId.set(h.id, h)
+
+  // Отели: сумма по выбранным stays (цена за ночь × ночи). Если stay нет, но отель
+  // в городе есть — считаем самый дешёвый на все ночи города (для обратной совместимости).
+  const staysByPlace = new Map<string, number>()
+  for (const stay of state.hotel_stays ?? []) {
+    const cost = (byId.get(stay.hotel_id)?.price_per_night ?? 0) * stay.nights
+    staysByPlace.set(stay.place_id, (staysByPlace.get(stay.place_id) ?? 0) + cost)
+  }
+
+  const cheapestByPlace = new Map<string, HotelOption>()
+  for (const h of state.hotels) {
+    const current = cheapestByPlace.get(h.place_id)
+    if (!current || (h.price_per_night ?? Number.POSITIVE_INFINITY) < (current.price_per_night ?? Number.POSITIVE_INFINITY)) {
+      cheapestByPlace.set(h.place_id, h)
+    }
+  }
+
   const stopsByPlace = new Map<string, number>()
   for (const stop of state.stops) stopsByPlace.set(stop.place_id, stop.days)
 
-  const hotels = state.hotels.reduce((sum, h) => {
+  const hotels = [...cheapestByPlace.values()].reduce((sum, h) => {
+    if (staysByPlace.has(h.place_id)) return sum // уже посчитан через stays
     const nights = stopsByPlace.get(h.place_id) ?? 0
     return sum + (h.price_per_night ?? 0) * nights
   }, 0)
@@ -116,7 +137,7 @@ export function totalKnownCost(state: TripState): number {
   const transport = state.transport.reduce((sum, l) => sum + (l.price ?? 0), 0)
   const activities = state.activities.reduce((sum, a) => sum + (a.price ?? 0), 0)
 
-  return hotels + transport + activities
+  return hotels + [...staysByPlace.values()].reduce((a, b) => a + b, 0) + transport + activities
 }
 
 function isOvernight(departure: string, arrival: string): boolean {

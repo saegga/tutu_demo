@@ -168,6 +168,19 @@ export async function getTrip(tripId: string): Promise<SqliteTripRow | null> {
   return mapTrip(row)
 }
 
+export async function listTrips(): Promise<SqliteTripRow[]> {
+  const rows = db.prepare('SELECT * FROM trips ORDER BY updated_at DESC').all() as Record<string, unknown>[]
+  return rows.map(mapTrip)
+}
+
+export async function deleteTrip(tripId: string): Promise<boolean> {
+  db.prepare('DELETE FROM messages WHERE trip_id = ?').run(tripId)
+  db.prepare('DELETE FROM proposals WHERE trip_id = ?').run(tripId)
+  db.prepare('DELETE FROM agent_events WHERE trip_id = ?').run(tripId)
+  const result = db.prepare('DELETE FROM trips WHERE id = ?').run(tripId)
+  return result.changes > 0
+}
+
 export async function updateTrip(
   tripId: string,
   patch: Partial<Pick<SqliteTripRow, 'draft' | 'core' | 'preferences' | 'state' | 'phase' | 'title'>>,

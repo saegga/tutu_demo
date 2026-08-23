@@ -1,6 +1,6 @@
 <template>
   <button
-    class="w-full rounded-lg px-4 py-2.5 font-medium transition disabled:cursor-not-allowed"
+    class="w-full cursor-pointer rounded-lg px-4 py-2.5 font-medium transition disabled:cursor-not-allowed"
     :class="enabled
       ? 'bg-emerald-600 text-white hover:bg-emerald-700'
       : 'bg-slate-200 text-slate-400'"

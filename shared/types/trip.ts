@@ -104,6 +104,12 @@ export interface HotelOption {
   source: 'mcp' | 'llm' | 'user'
 }
 
+export interface HotelStay {
+  hotel_id: string          // ссылка на HotelOption.id
+  place_id: string          // город
+  nights: number            // сколько ночей в этом отеле
+}
+
 export interface Constraint {
   id: string
   kind: 'no_night_transfer' | 'no_hotel_change' | 'no_early_morning' | 'custom'
@@ -118,8 +124,10 @@ export interface TripState {
   places: Place[]                    // справочник всех упомянутых мест
   stops: Stop[]
   activities: Activity[]
-  transport: TransportLeg[]
-  hotels: HotelOption[]
+  transport: TransportLeg[]          // ВЫБРАННЫЕ перегоны (по одному на пару from→to)
+  transport_options: TransportLeg[]  // все найденные варианты на каждый перегон (для выбора в UI)
+  hotels: HotelOption[]              // все найденные отели
+  hotel_stays: HotelStay[]           // выбранные отели с числом ночей (можно несколько в городе)
   constraints: Constraint[]
   pending_actions: string[]          // очевидные, ещё не применённые намерения пользователя
   updated_at: string

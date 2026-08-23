@@ -12,7 +12,7 @@ export default defineEventHandler(async () => {
         check_out: '2026-08-22',
         adults: 1,
         page: 1,
-        page_size: 5,
+        page_size: 10,
       },
     })
     console.log(result)

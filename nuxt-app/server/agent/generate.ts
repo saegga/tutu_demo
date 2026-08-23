@@ -1,5 +1,6 @@
 import {
   isDraftReadyToGenerate,
+  type HotelStay,
   type Pace,
   type Place,
   type Preferences,
@@ -13,6 +14,7 @@ import {
 import { optimizeTrip } from '../core/optimize'
 import { daysBetween, validateTrip } from '../core/validate'
 import { enrichTripStateWithHotels, enrichTripStateWithTransport } from '../mcp/enrich'
+import { runGenerationAgent } from './generate-agent'
 import { geocode } from '../utils/geocode'
 import { resolveSearchCity } from './country-cities'
 import { parseTransportMode } from './transport-mode'
@@ -147,7 +149,9 @@ export async function generateTripState(
     stops,
     activities: [],
     transport: [],
+    transport_options: [],
     hotels: [],
+    hotel_stays: [],
     constraints: (prefs.constraints as unknown[] | undefined)?.map((c, i) => ({
       id: `pc-${i}`,
       kind: 'custom' as const,
@@ -180,25 +184,121 @@ export async function buildGeneratedState(
     issues.push({ code: 'enrich_warning', severity: 'warning', message })
   }
 
-  const hotelsBefore = state.hotels.length
-  state = await enrichTripStateWithHotels(state).catch((e) => {
-    console.error('[MCP] hotels enrich failed:', e)
-    warn('Не удалось подобрать отели (MCP недоступен).')
-    return state
-  })
-  if (state.stops.length > 0 && state.hotels.length === hotelsBefore) {
-    warn('Отели не найдены — попробуй указать город точнее или конкретные даты.')
+  // MCP через агента (тулинг): LLM вызывает search_transport / search_hotels.
+  // Детерминированную логику (виды транспорта по перегонам) агент получает в промпте.
+  try {
+    const agent = await runGenerationAgent(state, draft.needs)
+    if (agent.transport.length > 0) state = { ...state, transport: agent.transport }
+    if (agent.transport_options.length > 0) state = { ...state, transport_options: agent.transport_options }
+    if (agent.hotels.length > 0) state = { ...state, hotels: agent.hotels }
+  } catch (e) {
+    console.error('[agent] MCP-тулинг не сработал, переключаюсь на фолбэк:', e)
   }
 
-  const transportBefore = state.transport.length
-  state = await enrichTripStateWithTransport(state, draft.needs).catch((e) => {
-    console.error('[MCP] transport enrich failed:', e)
-    warn('Не удалось подобрать перелёты (MCP недоступен).')
-    return state
-  })
-  if (state.transport.length === transportBefore && state.stops.length > 0) {
+  // Фолбэк: если агент не нашёл ничего (LLM/инструменты) — детерминированный enrich.
+  if (state.stops.length > 0 && state.transport.length === 0) {
+    state = await enrichTripStateWithTransport(state, draft.needs).catch((e) => {
+      console.error('[MCP] transport enrich failed:', e)
+      warn('Не удалось подобрать перелёты (MCP недоступен).')
+      return state
+    })
+  }
+  if (state.stops.length > 0 && state.transport.length === 0) {
     warn('Перелёты по маршруту не найдены — уточни города отправления/назначения.')
   }
 
+  if (state.stops.length > 0 && state.hotels.length === 0) {
+    state = await enrichTripStateWithHotels(state).catch((e) => {
+      console.error('[MCP] hotels enrich failed:', e)
+      warn('Не удалось подобрать отели (MCP недоступен).')
+      return state
+    })
+  }
+  if (state.stops.length > 0 && state.hotels.length === 0) {
+    warn('Отели не найдены — попробуй указать город точнее или конкретные даты.')
+  }
+
+  // Дефолтный выбор: в рамках бюджета, если он указан; иначе — минимальные суммы.
+  state = applyDefaultSelection(state)
+
   return { state, issues }
+}
+
+// ─── Дефолтный выбор вариантов ─────────────────────────────────────────
+// Транспорт: по каждому перегону берём самый дешёвый вариант из transport_options,
+// который влезает в бюджет (если бюджет указан). Если ничего не влезает — самый дешёвый.
+// Отели: по каждому городу — самый дешёвый отель, который влезает в бюджет; иначе самый дешёвый.
+export function applyDefaultSelection(state: TripState): TripState {
+  const budget = state.preferences.budget
+
+  // Транспорт: перегон уже может быть выбран (из агента/фолбэка). Если выбранного нет —
+  // выбираем самый дешёвый из вариантов в рамках бюджета.
+  const spentTransport = state.transport.reduce((sum, l) => sum + (l.price ?? 0), 0)
+  const transport = pickLegs(state, budget != null ? budget - spentTransport : null)
+    .map((l) => l ?? null)
+    .filter((l): l is NonNullable<typeof l> => l !== null)
+
+  // Отели: по городу — самый дешёвый в рамках бюджета (с учётом уже выбранного транспорта).
+  const stays: HotelStay[] = []
+  let remaining = budget != null ? budget - transport.reduce((s, l) => s + (l.price ?? 0), 0) : null
+
+  const stops = [...state.stops].sort((a, b) => a.order - b.order)
+  for (const stop of stops) {
+    const candidates = (state.hotels ?? []).filter((h) => h.place_id === stop.place_id)
+    if (candidates.length === 0) continue
+    const nights = Math.max(1, stop.days)
+
+    const affordable = budget == null || remaining == null
+      ? candidates
+      : candidates.filter((h) => (h.price_per_night ?? 0) * nights <= remaining + 0.5)
+    const chosen = [...(affordable.length ? affordable : candidates)]
+      .sort((a, b) => (a.price_per_night ?? Number.POSITIVE_INFINITY) - (b.price_per_night ?? Number.POSITIVE_INFINITY))[0]
+
+    stays.push({ hotel_id: chosen.id, place_id: stop.place_id, nights })
+    if (remaining != null && chosen.price_per_night != null) {
+      remaining -= chosen.price_per_night * nights
+    }
+  }
+
+  return { ...state, transport, hotel_stays: stays }
+}
+
+// Выбор перегонов: по паре from→to берём самый дешёвый из transport_options,
+// который влезает в оставшийся бюджет. Если такого нет — самый дешёвый вообще.
+function pickLegs(state: TripState, remainingBudget: number | null): Array<TransportLeg | null> {
+  const byPair = new Map<string, TransportLeg[]>()
+  for (const opt of state.transport_options ?? []) {
+    const key = `${opt.from_place_id}->${opt.to_place_id}`
+    const list = byPair.get(key) ?? []
+    if (!list.some((o) => o.id === opt.id)) list.push(opt)
+    byPair.set(key, list)
+  }
+
+  const pairs = new Map<string, string>()
+  const stops = [...state.stops].sort((a, b) => a.order - b.order)
+  const origin = state.places[0]
+  if (origin) pairs.set(`${origin.id}->${stops[0]?.place_id}`, '')
+  for (let i = 0; i < stops.length - 1; i++) {
+    pairs.set(`${stops[i].place_id}->${stops[i + 1].place_id}`, '')
+  }
+  if (stops.length > 0 && origin) pairs.set(`${stops[stops.length - 1].place_id}->${origin.id}`, '')
+
+  const result: Array<TransportLeg | null> = []
+  let remaining = remainingBudget
+  for (const key of pairs.keys()) {
+    const options = byPair.get(key)
+    if (!options || options.length === 0) {
+      result.push(null)
+      continue
+    }
+    const sorted = [...options].sort(
+      (a, b) => (a.price ?? Number.POSITIVE_INFINITY) - (b.price ?? Number.POSITIVE_INFINITY),
+    )
+    const chosen = remaining == null
+      ? sorted[0]
+      : (sorted.find((o) => (o.price ?? 0) <= remaining + 0.5) ?? sorted[0])
+    if (remaining != null && chosen.price != null) remaining -= chosen.price
+    result.push(chosen)
+  }
+  return result
 }

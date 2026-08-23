@@ -7,7 +7,7 @@
         <p class="text-[11px] text-slate-400">Расскажи, куда хочешь поехать</p>
       </div>
       <button
-        class="rounded-lg border px-2.5 py-1 text-xs text-slate-600 transition hover:bg-slate-50"
+        class="cursor-pointer rounded-lg border px-2.5 py-1 text-xs text-slate-600 transition hover:bg-slate-50"
         @click="reset"
       >
         Новая поездка
@@ -67,7 +67,7 @@
           @keyup.enter="submit"
         >
         <button
-          class="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50"
+          class="cursor-pointer rounded-lg bg-blue-600 px-4 py-2 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
           :disabled="busy || !message.trim()"
           @click="submit"
         >

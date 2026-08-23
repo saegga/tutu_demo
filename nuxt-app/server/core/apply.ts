@@ -18,7 +18,9 @@ export function applyProposal(
     stops: state.stops.map((s) => ({ ...s })),
     activities: [...state.activities],
     transport: [...state.transport],
+    transport_options: [...(state.transport_options ?? [])],
     hotels: [...state.hotels],
+    hotel_stays: (state.hotel_stays ?? []).map((s) => ({ ...s })),
     constraints: [...state.constraints],
     pending_actions: [...state.pending_actions],
   }
@@ -79,9 +81,17 @@ function applyChange(state: TripState, op: ChangeOp, newPlaces: Place[]): void {
       break
     case 'add_transport':
       state.transport.push(op.leg)
+      if (op.leg.id && !(state.transport_options ?? []).some((o) => o.id === op.leg.id)) {
+        state.transport_options = [...(state.transport_options ?? []), op.leg]
+      }
       break
     case 'add_hotel':
       state.hotels.push(op.hotel)
+      state.hotel_stays = [...(state.hotel_stays ?? []), {
+        hotel_id: op.hotel.id,
+        place_id: op.hotel.place_id,
+        nights: 1,
+      }]
       break
     case 'set_budget':
       state.preferences.budget = op.budget

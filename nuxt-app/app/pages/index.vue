@@ -8,7 +8,19 @@
     <!-- RIGHT: MAP / ROUTE -->
     <main class="relative flex-1 min-w-0">
       <ClientOnly>
-        <RouteOverlay :state="tripState" :issues="issues" :draft="draft" />
+        <RouteOverlay
+          :state="tripState"
+          :issues="issues"
+          :draft="draft"
+          :on-select-transport="selectTransport"
+          :on-select-hotel="selectHotel"
+          :on-change-nights="changeHotelNights"
+          :on-save-route="saveTrip"
+          :saved="saved"
+          :on-list-trips="listSavedTrips"
+          :on-load-trip="loadTrip"
+          :on-delete-trip="deleteTrip"
+        />
       </ClientOnly>
     </main>
   </div>
@@ -17,5 +29,17 @@
 <script setup lang="ts">
 import { useAgent } from '../composables/useAgent'
 
-const { tripState, issues, draft } = useAgent()
+const {
+  tripState,
+  issues,
+  draft,
+  selectTransport,
+  selectHotel,
+  changeHotelNights,
+  saveTrip,
+  saved,
+  listSavedTrips,
+  loadTrip,
+  deleteTrip,
+} = useAgent()
 </script>

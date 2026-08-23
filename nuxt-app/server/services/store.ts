@@ -26,6 +26,20 @@ export const getTrip = (client: SupabaseClient, tripId: string) => {
   return supabaseStore.getTrip(client, tripId)
 }
 
+export const listTrips = (client: SupabaseClient) => {
+  const mode = getDbMode()
+  if (mode === 'sqlite') return sqlite.listTrips()
+  if (mode === 'mock') return mock.listTrips()
+  return supabaseStore.listTrips(client)
+}
+
+export const deleteTrip = (client: SupabaseClient, tripId: string) => {
+  const mode = getDbMode()
+  if (mode === 'sqlite') return sqlite.deleteTrip(tripId)
+  if (mode === 'mock') return mock.deleteTrip(tripId)
+  return supabaseStore.deleteTrip(client, tripId)
+}
+
 export const updateTrip = (
   client: SupabaseClient,
   tripId: string,
