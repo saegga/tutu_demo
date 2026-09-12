@@ -16,7 +16,7 @@
 
 ![Детали маршрута](screenshots/chat-detail-2.jpg)
 
-![Маршрут на карте](screenshots/chat-map-ex2.jpg)
+![Маршрут на карте]()
 
 ## Запуск
 
